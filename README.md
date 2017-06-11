@@ -36,7 +36,9 @@
 		->source( 'path/to/source/image2.jpg' );
 		->size( 800, 600 )->save( 'path/to/destination/image3.jpg' );
 	   
-	// Resizes and remove source image.
+	   
+	- **Resizes and remove source image.**
+	
 	ImageResize::source( 'path/to/source/image.jpg' )
 		->size( 100, 100 )
 		->save( 'path/to/destination/image.jpg' )
