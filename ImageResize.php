@@ -81,7 +81,7 @@
          * @access private
          * @var string
          */
-        private $imageNamePattern = '/[^a-zA-Z0-9\.\/\-_]/';
+        private $imageNamePattern = '/[^a-zA-Z0-9\.\/\-_:]/';
 
         /**
          * Holds eventual error plain message.
