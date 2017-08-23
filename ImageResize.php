@@ -58,6 +58,14 @@
         private $source = '';
 
         /**
+         * IMAGETYPE_XXX [ 1:GIF, 2:JPEG, 3:PNG ]
+         *
+         * @access private
+         * @var int
+         */
+        private $source_type = 0;
+
+        /**
          * Full or relative path destination image.
          *
          * @access private
@@ -234,12 +242,16 @@
                     return $this;
                 }
 
+                clearstatcache();
+
                 if( false == is_file( $source ) )
                 {
                     $this->errors[] = "Source: [{$source}] is not a file or does not have a valid name.";
 
                     return $this;
                 }
+
+                clearstatcache();
 
                 if( false == is_readable( $source ) )
                 {
@@ -248,7 +260,7 @@
                     return $this;
                 }
 
-                list($this->src_w , $this->src_h) = getimagesize( $source );
+                list($this->src_w , $this->src_h , $source_type) = getimagesize( $source );
 
                 if( !$this->src_w || !$this->src_h )
                 {
@@ -258,6 +270,38 @@
 
                     return $this;
                 }
+
+                $source_type = intval( $source_type );
+
+                switch( $source_type )
+                {
+                    case 1:
+                        $source_type_equals_extension = preg_match( '/(\.gif)$/i', $source );
+                        break;
+
+                    case 2:
+                        $source_type_equals_extension = preg_match( '/(\.jpe?g)$/i', $source );
+                        break;
+
+                    case 3:
+                        $source_type_equals_extension = preg_match( '/(\.png)$/i', $source );
+                        break;
+
+                    default:
+                        $source_type_equals_extension = false;
+                        break;
+                }
+
+                if( false == $source_type_equals_extension )
+                {
+                    $this->errors[] = "IMAGETYPE_XXX: [{$source_type}] invalid.";
+
+                    $this->src_w = $this->src_h = 0;
+
+                    return $this;
+                }
+
+                $this->source_type = $source_type;
 
                 $this->source = $source;
             }
@@ -353,6 +397,38 @@
         }// calculate()
 
         /**
+         * Apply Transparency on PNG and GIF images.
+         *
+         * @link https://github.com/maxim/smart_resize_image
+         *
+         * @param $final_image
+         * @param $source_image
+         */
+        private function transparencyApply( &$final_image, &$source_image )
+        {
+            if( in_array($this->source_type,array(1,3)) )
+            {
+                $transparency = imagecolortransparent( $source_image );
+                $palletsize = imagecolorstotal( $source_image );
+
+                if( $transparency >= 0 && $transparency < $palletsize )
+                {
+                    $transparent_color = imagecolorsforindex( $source_image , $transparency );
+                    $transparency = imagecolorallocate( $final_image , $transparent_color['red'] , $transparent_color['green'] , $transparent_color['blue'] );
+                    imagefill( $final_image , 0 , 0 , $transparency );
+                    imagecolortransparent( $final_image , $transparency );
+                }
+                elseif( $this->source_type == 3 )
+                {
+                    imagealphablending( $final_image , false );
+                    $color = imagecolorallocatealpha( $final_image , 0 , 0 , 0 , 127 );
+                    imagefill( $final_image , 0 , 0 , $color );
+                    imagesavealpha( $final_image , true );
+                }
+            }
+        }
+
+        /**
          * Create final image.
          *
          * Define image quality.
@@ -369,15 +445,13 @@
          */
         public function save( $dest = '', $quality = null )
         {
-            $this->quality = ($quality) ? $quality : $this->quality;
+            $this->quality = ($quality) ? $quality : ( ($this->source_type==3) ? 100 : $this->quality );
 
-            $this->dest = preg_replace( $this->imageNamePattern, '', strtolower($dest) );
+            $this->dest = preg_replace( $this->imageNamePattern, '', $dest );
 
-            $extOrigem = explode( '.', $this->source );
-            $extOrigem = strtolower( end( $extOrigem ) );
+            $extOrigem = strtolower( pathinfo( $this->source, PATHINFO_EXTENSION ) );
 
-            $extDest = explode( '.', $this->dest );
-            $extDest = end( $extDest );
+            $extDest = pathinfo( $this->dest, PATHINFO_EXTENSION );
 
             if( $extOrigem != $extDest )
             {
@@ -427,14 +501,16 @@
 
                 if( false == $this->dst_image )
                 {
-                    $this->errors[] = "Imagetruecolor failed for resized image.";
+                    $this->errors[] = 'Imagetruecolor failed for resized image.';
 
                     return $this;
                 }
 
+                $this->transparencyApply( $this->dst_image, $this->src_image );
+
                 if( false == imagecopyresampled ( $this->dst_image , $this->src_image , 0, 0, 0, 0 , $this->dst_w , $this->dst_h , $this->src_w , $this->src_h ) )
                 {
-                    $this->errors[] = "imagecopyresampled failed for resized image.";
+                    $this->errors[] = 'imagecopyresampled failed for resized image.';
 
                     return $this;
                 }
@@ -447,14 +523,16 @@
 
                     if( false == $this->dst_cropped )
                     {
-                        $this->errors[] = "Imagetruecolor failed for cropped image.";
+                        $this->errors[] = 'Imagetruecolor failed for cropped image.';
 
                         return $this;
                     }
 
+                    $this->transparencyApply( $this->dst_cropped, $this->dst_image );
+
                     if( false == imagecopyresampled( $this->dst_cropped, $this->dst_image, 0, 0, $this->src_x, $this->src_y, $this->maxWidth, $this->maxHeight, $this->maxWidth, $this->maxHeight) )
                     {
-                        $this->errors[] = "imagecopyresampled failed for cropped image.";
+                        $this->errors[] = 'imagecopyresampled failed for cropped image.';
 
                         return $this;
                     }
@@ -465,7 +543,7 @@
                 switch( $extDest )
                 {
                     case 'gif':
-                        imagegif( $this->dst_final , $this->dest, $this->quality );
+                        imagegif( $this->dst_final , $this->dest );
                         break;
 
                     case 'jpeg':
@@ -474,6 +552,7 @@
                         break;
 
                     case 'png':
+                        $this->quality = intval((  9 * $this->quality ) / 100 );
                         imagepng( $this->dst_final , $this->dest, $this->quality );
                         break;
                 }
@@ -528,7 +607,7 @@
          */
         public function customErrorHandler( $errno , $errstr , $errfile , $errline )
         {
-
+            //TODO:
         }
 
         /**
